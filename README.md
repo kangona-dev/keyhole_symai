@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Keyhole
 
-## Getting Started
+**Apply for rentals without handing over your life.**
 
-First, run the development server:
+Keyhole is a privacy-first alternative to rental application platforms such as 2Apply and Snug, built for international students renting in Sydney. Built at Sym AI Open 2026 (Macquarie University, 17–18 October 2026).
 
-```bash
+## The problem
+
+- In April 2026 the Privacy Commissioner found that 2Apply's operator collected personal information that wasn't reasonably necessary, by unfair means, across more than 8.5 million applications. Flagged categories include gender, student status and visa expiry.
+- NSW passed a renter privacy law in September 2026 (expected to start in early 2027): a standard form, no questions about social media, personal photos, tattoos or children, and ID collected only from the preferred applicant.
+- In February 2026, Guardian Australia reported rental documents on several platforms reachable through links with no login, including one using sequential codes.
+
+## What Keyhole does
+
+| Feature | How it works |
+| --- | --- |
+| **Form X-ray** | Agents paste any application form. Rules based on the Privacy Commissioner's determination and the NSW law flag unnecessary questions with a reason and source, and "Fix form" saves only the clean questions. |
+| **Renter-side flags** | Renters see flagged questions marked as optional when they apply. |
+| **ID locked** | Only payslip and reference are shared on apply. ID unlocks only when the agent marks the renter as the preferred applicant. |
+| **Watermarked viewing** | Agents never get a file link. Every view goes through a server route that checks the agent's agency, the grant, the expiry and the document type, then returns a copy stamped with the listing, the agent's name and the time. |
+| **Access log** | Every view is recorded and shown to the renter. |
+| **Revoke** | One tap. The agent's open document goes blank within seconds. Renters can restore access. |
+
+## Architecture
+
+- **Next.js 16** (App Router, server actions, route handlers) deployed on **Vercel**.
+- **Supabase**: Postgres, Auth (email/password) and a private Storage bucket.
+- Row Level Security is enabled on every table with no public policies, so browsers can't query the database directly. All reads and writes go through server code that checks the signed-in user's role and agency.
+- Share tokens are random UUIDs; nothing sequential appears in URLs.
+- Watermarks are generated as SVG on the server with no image library.
+
+**Data model:** `agencies` → `profiles` (renter or agent) → `listings` → `listing_questions`; renters own `documents`; an `application` links a renter to a listing and has one `share_grant` (token, allowed document types, expiry, revoked time); every view writes to `access_log`.
+
+**What breaks first at 10,000 users:** serving watermarked documents (each view downloads and re-encodes a file). Fix: watermark once per grant and cache it behind short-lived signed URLs and a CDN. Next: access-log writes (append-only, indexed by grant, partition by month) and listing search (pagination and indexes).
+
+## Run locally
+
+```
+npm install
+cp .env.example .env.local   # fill in your Supabase values
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Run `supabase/migrations/001_keyhole.sql` in the Supabase SQL Editor first.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Honesty notes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- All people, agencies and documents are synthetic. Sample documents are in `public/samples/`.
+- Form X-ray flags questions using published reasons; it isn't legal advice. The 2Apply determination concerns one platform and is reportedly under review.
+- Not built: identity verification, notifications, agency CRM integrations, automatic deletion after a declined application.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built with Next.js, React, Tailwind CSS, Supabase and Vercel, with help from AI coding tools (Cursor and Claude).
