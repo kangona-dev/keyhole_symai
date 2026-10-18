@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { GLYPHS, UNITS_PER_EM } from "@/lib/glyphs";
+import { MAX_DOC_WIDTH } from "@/lib/images";
 
 function esc(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -29,7 +30,8 @@ function textPaths(text: string, x: number, baseline: number, size: number, fill
  * The agent's browser only ever receives the stamped image, never the original.
  */
 export async function flattenWatermark(opts: { bytes: Buffer; text: string; footer: string }): Promise<Buffer> {
-  const base = sharp(opts.bytes, { failOn: "none" }).rotate();
+  // Uploads are already resized; this also caps files stored before that change.
+  const base = sharp(opts.bytes, { failOn: "none" }).rotate().resize({ width: MAX_DOC_WIDTH, withoutEnlargement: true });
   const { data, info } = await base.toBuffer({ resolveWithObject: true });
   const w = info.width;
   const h = info.height;

@@ -19,10 +19,12 @@ async function AgentDashboard({ searchParams }: Props) {
   const profile = await requireRole("agent");
   const sp = await searchParams;
   const db = admin();
+  // listing_summaries counts applications and flagged questions in the
+  // database, so the dashboard never loads individual application rows.
   const { data: listings } = profile.agency_id
     ? await db
-        .from("listings")
-        .select("id, address, weekly_rent, created_at, applications(id), listing_questions(id, flagged_reason)")
+        .from("listing_summaries")
+        .select("id, address, weekly_rent, application_count, flagged_count")
         .eq("agency_id", profile.agency_id)
         .order("created_at", { ascending: false })
     : { data: [] };
@@ -68,11 +70,9 @@ async function AgentDashboard({ searchParams }: Props) {
               <p className="text-sm text-slate-500">No listings yet.</p>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {(listings ?? []).map((l) => {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const row = l as any;
-                  const apps = (row.applications ?? []).length;
-                  const flagged = (row.listing_questions ?? []).filter((q: { flagged_reason: string | null }) => q.flagged_reason).length;
+                {(listings ?? []).map((row) => {
+                  const apps: number = row.application_count ?? 0;
+                  const flagged: number = row.flagged_count ?? 0;
                   return (
                     <li key={row.id} className="flex items-center justify-between gap-3 py-3">
                       <div>

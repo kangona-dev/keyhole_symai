@@ -9,6 +9,9 @@ import { Card, Header, Loading, LockIcon, Page, StatusBadge, secondaryButtonClas
 
 type Props = { params: Promise<{ id: string }> };
 
+/** Matches run_cleanup in supabase/migrations/002_scalability.sql. */
+const DECLINED_RETENTION_DAYS = 30;
+
 export default function ApplicationPage(props: Props) {
   return (
     <Suspense fallback={<Loading />}>
@@ -24,7 +27,7 @@ async function Application({ params }: Props) {
   const db = admin();
   const { data: app } = await db
     .from("applications")
-    .select("id, status, created_at, renter_id, listing_id, listings(address)")
+    .select("id, status, created_at, declined_at, renter_id, listing_id, listings(address)")
     .eq("id", id)
     .maybeSingle();
   if (!app || app.renter_id !== profile.id) notFound();
@@ -61,6 +64,16 @@ async function Application({ params }: Props) {
           <StatusBadge status={app.status} />
         </div>
         <p className="text-slate-600">Applied {formatDate(app.created_at)}</p>
+        {app.status === "declined" && (
+          <p className="mt-3 rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-700">
+            The agent declined this application, so none of your documents are shared any more.
+            {app.declined_at
+              ? ` This application and its access log are deleted automatically on ${formatDate(
+                  new Date(new Date(app.declined_at).getTime() + DECLINED_RETENTION_DAYS * 24 * 3600 * 1000),
+                )}.`
+              : ""}
+          </p>
+        )}
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.3fr]">
           <Card>
@@ -98,7 +111,7 @@ async function Application({ params }: Props) {
                   <button className="w-full rounded-lg bg-red-600 px-4 py-3 text-lg font-semibold text-white hover:bg-red-700">
                     Revoke access
                   </button>
-                  <p className="mt-2 text-xs text-slate-500">The agent&apos;s open document goes blank within seconds.</p>
+                  <p className="mt-2 text-xs text-slate-500">The agent&apos;s open document goes blank straight away. A screenshot they already took can&apos;t be undone, but it carries their name.</p>
                 </form>
               )}
             </div>

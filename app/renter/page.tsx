@@ -23,7 +23,7 @@ async function RenterDashboard() {
       .select("id, status, created_at, listings(address)")
       .eq("renter_id", profile.id)
       .order("created_at", { ascending: false }),
-    db.from("documents").select("type").eq("owner_id", profile.id),
+    db.from("documents").select("type").eq("owner_id", profile.id).not("uploaded_at", "is", null),
   ]);
   const docTypes = new Set((docs ?? []).map((d) => d.type));
   const missing = ["id", "payslip", "reference"].filter((t) => !docTypes.has(t));

@@ -18,7 +18,7 @@ export default function ViewPage(props: Props) {
 async function View({ params }: Props) {
   const profile = await requireRole("agent");
   const { token, docId } = await params;
-  const check = await checkGrantForAgent(token, profile);
+  const check = await checkGrantForAgent(token, profile, docId);
 
   return (
     <>
@@ -31,7 +31,12 @@ async function View({ params }: Props) {
             <p className="mb-4 text-sm text-slate-600">
               Watermarked view. Every view is logged and visible to the applicant, who can revoke access at any time.
             </p>
-            <LiveDocument token={token} docId={docId} />
+            <LiveDocument
+              token={token}
+              docId={docId}
+              docType={check.document?.type ?? null}
+              expiresAt={check.grant.expires_at}
+            />
           </>
         ) : (
           <div className="rounded-xl border border-red-200 bg-red-50 p-10 text-center">

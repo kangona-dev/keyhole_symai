@@ -7,6 +7,7 @@ import { isUuid } from "@/lib/format";
 import { xrayQuestion } from "@/lib/xray-rules";
 import { applyToListing } from "@/app/actions";
 import { Card, ErrorNote, Header, Loading, LockIcon, Page, buttonClass, inputClass } from "@/components/ui";
+import SubmitButton from "@/components/submit-button";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -37,7 +38,7 @@ async function Listing({ params, searchParams }: Props) {
   const [{ data: questions }, { data: existing }, { data: docs }] = await Promise.all([
     db.from("listing_questions").select("id, question").eq("listing_id", id).order("position"),
     db.from("applications").select("id").eq("listing_id", id).eq("renter_id", profile.id).maybeSingle(),
-    db.from("documents").select("type").eq("owner_id", profile.id),
+    db.from("documents").select("type").eq("owner_id", profile.id).not("uploaded_at", "is", null),
   ]);
   const docTypes = new Set((docs ?? []).map((d) => d.type));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,7 +95,7 @@ async function Listing({ params, searchParams }: Props) {
                     <input id={`q_${q.id}`} name={`q_${q.id}`} className={inputClass} />
                   </div>
                 ))}
-                <button className={buttonClass}>Apply securely</button>
+                <SubmitButton pendingText="Applying…" className={buttonClass}>Apply securely</SubmitButton>
               </form>
             </Card>
 

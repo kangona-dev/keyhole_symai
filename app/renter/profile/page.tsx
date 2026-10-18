@@ -4,7 +4,8 @@ import { requireRole } from "@/lib/auth";
 import { admin } from "@/lib/supabase/admin";
 import { DOC_LABELS, formatDate } from "@/lib/format";
 import { deleteDocument } from "@/app/actions";
-import { Card, ErrorNote, Header, Loading, Page, buttonClass, inputClass } from "@/components/ui";
+import { Card, ErrorNote, Header, Loading, Page } from "@/components/ui";
+import DocumentUploadForm from "@/components/document-upload-form";
 
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
@@ -24,6 +25,7 @@ async function Documents({ searchParams }: Props) {
     .from("documents")
     .select("id, type, file_name, created_at")
     .eq("owner_id", profile.id)
+    .not("uploaded_at", "is", null)
     .order("created_at", { ascending: false });
 
   return (
@@ -42,27 +44,7 @@ async function Documents({ searchParams }: Props) {
         <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
           <Card>
             <h2 className="mb-3 font-semibold">Upload a document</h2>
-            <form action="/api/documents" method="post" encType="multipart/form-data" className="space-y-4">
-              <div>
-                <label htmlFor="type" className="mb-1 block text-sm font-medium">Document type</label>
-                <select id="type" name="type" className={inputClass} defaultValue="payslip">
-                  <option value="id">ID document (stays locked until you&apos;re preferred)</option>
-                  <option value="payslip">Payslip</option>
-                  <option value="reference">Rental reference</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="file" className="mb-1 block text-sm font-medium">Image (PNG or JPG, up to 4 MB)</label>
-                <input id="file" name="file" type="file" accept="image/png,image/jpeg" required className="block w-full text-sm" />
-              </div>
-              <button className={buttonClass}>Upload</button>
-              <p className="text-xs text-slate-500">
-                Use sample documents only. Download test files:{" "}
-                <a className="underline" href="/samples/sample-id.png" download>ID</a>,{" "}
-                <a className="underline" href="/samples/sample-payslip.png" download>payslip</a>,{" "}
-                <a className="underline" href="/samples/sample-reference.png" download>reference</a>.
-              </p>
-            </form>
+            <DocumentUploadForm />
           </Card>
 
           <Card>

@@ -2,11 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { admin } from "@/lib/supabase/admin";
 import { getProfile, homeFor, requireRole } from "@/lib/auth";
 import { parseQuestions, xrayQuestion } from "@/lib/xray-rules";
 import { isUuid } from "@/lib/format";
+import { clientIp, LIMITS, rateLimit } from "@/lib/rate-limit";
+import { drainStorageCleanup } from "@/lib/storage-cleanup";
 
 function str(formData: FormData, key: string) {
   const v = formData.get(key);
@@ -27,6 +30,9 @@ export async function signUp(formData: FormData) {
   }
   if (role === "agent" && !isUuid(agencyId)) {
     redirect("/signup?error=" + encodeURIComponent("Agents need to pick an agency."));
+  }
+  if (!(await rateLimit(`signup:ip:${await clientIp()}`, LIMITS.signupPerIp))) {
+    redirect("/signup?error=" + encodeURIComponent("Too many sign-ups from your network. Please try again later."));
   }
 
   const supabase = await createClient();
@@ -58,6 +64,13 @@ export async function signUp(formData: FormData) {
 export async function signIn(formData: FormData) {
   const email = str(formData, "email").toLowerCase();
   const password = str(formData, "password");
+  const [ipOk, emailOk] = await Promise.all([
+    rateLimit(`login:ip:${await clientIp()}`, LIMITS.loginPerIp),
+    rateLimit(`login:email:${email}`, LIMITS.loginPerEmail),
+  ]);
+  if (!ipOk || !emailOk) {
+    redirect("/login?error=" + encodeURIComponent("Too many sign-in attempts. Please wait 15 minutes and try again."));
+  }
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) redirect("/login?error=" + encodeURIComponent(error.message));
@@ -138,25 +151,44 @@ export async function saveCleanQuestions(listingId: string, questions: string[])
   return { ok: true, message: `Saved ${clean.length} questions to the listing.` };
 }
 
+/**
+ * Makes one applicant the listing's preferred applicant and unlocks their ID.
+ * Runs in one database transaction: any previous preferred applicant goes back
+ * to submitted and their ID is locked again, and a unique index guarantees
+ * there's never more than one.
+ */
 export async function markPreferred(formData: FormData) {
   const agent = await requireRole("agent");
   const applicationId = str(formData, "application_id");
   if (!isUuid(applicationId)) redirect("/agent");
-  const db = admin();
-  const { data: app } = await db
-    .from("applications")
-    .select("id, listing_id")
-    .eq("id", applicationId)
-    .maybeSingle();
-  if (!app || !(await agentOwnsListing(agent.agency_id, app.listing_id))) redirect("/agent");
+  const { data, error } = await admin().rpc("set_preferred_applicant", {
+    p_application: applicationId,
+    p_agent: agent.id,
+  });
+  if (error) console.error("set_preferred_applicant failed", error);
+  const result = (data ?? {}) as { ok?: boolean; reason?: string; listing_id?: string };
+  if (!result.listing_id) redirect("/agent");
+  after(() => drainStorageCleanup(admin(), 1));
+  revalidatePath(`/agent/listings/${result.listing_id}`);
+  redirect(`/agent/listings/${result.listing_id}`);
+}
 
-  await db.from("applications").update({ status: "preferred" }).eq("id", applicationId);
-  await db
-    .from("share_grants")
-    .update({ doc_types: ["payslip", "reference", "id"] })
-    .eq("application_id", applicationId);
-  revalidatePath(`/agent/listings/${app.listing_id}`);
-  redirect(`/agent/listings/${app.listing_id}`);
+/** Declines an application: sharing stops now, and it's deleted automatically after 30 days. */
+export async function declineApplication(formData: FormData) {
+  const agent = await requireRole("agent");
+  const applicationId = str(formData, "application_id");
+  const page = str(formData, "page");
+  if (!isUuid(applicationId)) redirect("/agent");
+  const { data, error } = await admin().rpc("decline_application", {
+    p_application: applicationId,
+    p_agent: agent.id,
+  });
+  if (error) console.error("decline_application failed", error);
+  const result = (data ?? {}) as { ok?: boolean; listing_id?: string };
+  if (!result.listing_id) redirect("/agent");
+  after(() => drainStorageCleanup(admin(), 1));
+  revalidatePath(`/agent/listings/${result.listing_id}`);
+  redirect(`/agent/listings/${result.listing_id}${/^\d+$/.test(page) ? `?page=${page}` : ""}`);
 }
 
 // ---------- Renter ----------
@@ -178,24 +210,20 @@ export async function applyToListing(formData: FormData) {
     if (value) answers[q.question] = value.slice(0, 1000);
   }
 
-  const { data: existing } = await db
-    .from("applications")
-    .select("id")
-    .eq("listing_id", listingId)
-    .eq("renter_id", renter.id)
-    .maybeSingle();
-  if (existing) redirect(`/renter/applications/${existing.id}`);
-
-  const { data: app, error } = await db
-    .from("applications")
-    .insert({ listing_id: listingId, renter_id: renter.id, answers })
-    .select("id")
-    .single();
-  if (error || !app) redirect(`/renter/listings/${listingId}?error=` + encodeURIComponent(error?.message ?? "Couldn't apply."));
-
-  await db.from("share_grants").insert({ application_id: app.id, doc_types: ["payslip", "reference"] });
+  // Insert, or return the existing application, plus its share grant, in one
+  // transaction. A double-clicked Apply just lands on the same application.
+  const { data, error } = await db.rpc("apply_to_listing", {
+    p_listing: listingId,
+    p_renter: renter.id,
+    p_answers: answers,
+  });
+  const result = (data ?? {}) as { ok?: boolean; reason?: string; application_id?: string };
+  if (error || !result.ok || !result.application_id) {
+    if (error) console.error("apply_to_listing failed", error);
+    redirect(`/renter/listings/${listingId}?error=` + encodeURIComponent("Couldn't apply. Please try again."));
+  }
   revalidatePath("/renter");
-  redirect(`/renter/applications/${app.id}`);
+  redirect(`/renter/applications/${result.application_id}`);
 }
 
 async function renterOwnsApplication(renterId: string, applicationId: string) {
@@ -212,6 +240,9 @@ export async function revokeAccess(formData: FormData) {
     .from("share_grants")
     .update({ revoked_at: new Date().toISOString() })
     .eq("application_id", applicationId);
+  // The database trigger pushes the revoke to the agent's open viewer and
+  // queues the stamped copies for deletion; remove those files straight away.
+  after(() => drainStorageCleanup(admin(), 1));
   revalidatePath(`/renter/applications/${applicationId}`);
   redirect(`/renter/applications/${applicationId}`);
 }
@@ -243,7 +274,10 @@ export async function deleteDocument(formData: FormData) {
     .maybeSingle();
   if (doc && doc.owner_id === renter.id) {
     await db.storage.from("documents").remove([doc.storage_path]);
+    // Deleting the row also deletes its stamped copies; the trigger queues
+    // their files (and this one, in case the remove above failed).
     await db.from("documents").delete().eq("id", docId);
+    after(() => drainStorageCleanup(admin(), 1));
   }
   revalidatePath("/renter/profile");
   redirect("/renter/profile");

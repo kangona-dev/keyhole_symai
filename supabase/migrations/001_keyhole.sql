@@ -1,9 +1,14 @@
 -- Keyhole database schema.
 -- Paste this whole file into Supabase > SQL Editor > New query > Run.
 -- Safe to re-run: it drops and recreates the Keyhole tables (demo data only).
+-- Then run 002_scalability.sql.
 
 drop trigger if exists on_auth_user_created on auth.users;
 drop function if exists public.handle_new_user() cascade;
+drop table if exists public.stamped_copies cascade;
+drop table if exists public.storage_cleanup cascade;
+drop table if exists public.access_log_archive cascade;
+drop table if exists public.rate_limits cascade;
 drop table if exists public.access_log cascade;
 drop table if exists public.share_grants cascade;
 drop table if exists public.applications cascade;

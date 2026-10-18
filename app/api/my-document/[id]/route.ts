@@ -13,6 +13,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .from("documents")
     .select("owner_id, storage_path, content_type")
     .eq("id", id)
+    .not("uploaded_at", "is", null)
     .maybeSingle();
   if (!doc || doc.owner_id !== profile.id) return new Response("Not found", { status: 404 });
   const { data: blob } = await db.storage.from("documents").download(doc.storage_path);
