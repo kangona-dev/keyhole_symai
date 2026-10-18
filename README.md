@@ -27,7 +27,7 @@ Keyhole is a privacy-first alternative to rental application platforms such as 2
 - **Supabase**: Postgres, Auth (email/password) and a private Storage bucket.
 - Row Level Security is enabled on every table with no public policies, so browsers can't query the database directly. All reads and writes go through server code that checks the signed-in user's role and agency.
 - Share tokens are random UUIDs; nothing sequential appears in URLs.
-- Watermarks are generated as SVG on the server with no image library.
+- Watermarks are burned into the image pixels on the server with sharp, so the browser only ever receives the stamped copy, never the original file. Text is drawn as vector outlines, so no fonts are needed on the server.
 
 **Data model:** `agencies` → `profiles` (renter or agent) → `listings` → `listing_questions`; renters own `documents`; an `application` links a renter to a listing and has one `share_grant` (token, allowed document types, expiry, revoked time); every view writes to `access_log`.
 

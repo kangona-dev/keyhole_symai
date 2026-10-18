@@ -3,7 +3,8 @@ import { getProfile } from "@/lib/auth";
 import { admin } from "@/lib/supabase/admin";
 import { checkGrantForAgent, REASON_TEXT } from "@/lib/grants";
 import { DOC_LABELS, formatDateTime, isUuid } from "@/lib/format";
-import { messageSvg, watermarkedSvg } from "@/lib/watermark";
+import { messageSvg } from "@/lib/watermark";
+import { flattenWatermark } from "@/lib/flatten";
 
 function svg(body: string, status = 200) {
   return new Response(body, {
@@ -20,7 +21,8 @@ function svg(body: string, status = 200) {
 /**
  * The only way an agent can see a renter's document. Every request checks the
  * agent's agency, the share grant (not revoked, not expired, includes this
- * document type), writes an access-log row, then returns a watermarked copy.
+ * document type), writes an access-log row, then returns a copy with the
+ * watermark burned into the pixels. The original file never reaches the browser.
  */
 export async function GET(
   _request: NextRequest,
@@ -51,11 +53,23 @@ export async function GET(
   await db.from("access_log").insert({ grant_id: check.grant.id, viewer_id: profile.id, document_id: doc.id });
 
   const when = formatDateTime(new Date());
-  const body = watermarkedSvg({
-    bytes: Buffer.from(await blob.arrayBuffer()),
-    contentType: doc.content_type,
-    text: `For ${check.listing.address} application only · ${profile.display_name} · ${when}`,
-    footer: `${DOC_LABELS[doc.type] ?? doc.type} · viewed by ${profile.display_name} (${profile.agency_name ?? "agency"}) · ${when} · via Keyhole`,
-  });
-  return svg(body);
+  try {
+    const jpeg = await flattenWatermark({
+      bytes: Buffer.from(await blob.arrayBuffer()),
+      text: `For ${check.listing.address} application only · ${profile.display_name} · ${when}`,
+      footer: `${DOC_LABELS[doc.type] ?? doc.type} · viewed by ${profile.display_name} (${profile.agency_name ?? "agency"}) · ${when} · via Keyhole`,
+    });
+    return new Response(new Uint8Array(jpeg), {
+      headers: {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "no-store, private, max-age=0",
+        "X-Content-Type-Options": "nosniff",
+        "X-Keyhole-Watermark": "burned-in",
+      },
+    });
+  } catch (err) {
+    console.error("Watermark failed", err);
+    // Never fall back to the unwatermarked original.
+    return svg(messageSvg("Couldn't render document", "Please try again."), 500);
+  }
 }
